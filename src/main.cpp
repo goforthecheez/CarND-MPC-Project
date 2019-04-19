@@ -98,8 +98,56 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+
+          // Convert all values from global coordinates to vehicle coordinates.
+          vector<double> car_ptsx(ptsx.size());
+          vector<double> car_ptsy(ptsy.size());
+          for (uint i = 0; i < car_ptsx.size(); ++i) {
+            // The equation for the inverse transformation was taken from:
+            // https://carnd.slack.com/archives/C54DV4BK6/p1522679678000068
+            car_ptsx[i] = (cos(-psi) * (ptsx[i] - px)) - (sin(-psi) * (ptsy[i] - py));
+            car_ptsy[i] = (sin(-psi) * (ptsx[i] - px)) + (cos(-psi) * (ptsy[i] - py));
+          }
+
+          // Convert ptsx, ptxy to Eigen::VectorXds.
+          Eigen::VectorXd eigen_ptsx(car_ptsx.size());
+          Eigen::VectorXd eigen_ptsy(car_ptsy.size());
+          for (uint i = 0; i < car_ptsx.size(); ++i) {
+            eigen_ptsx(i) = car_ptsx[i];
+            eigen_ptsy(i) = car_ptsy[i];
+          }
+          // Fit a third degree polynomial.
+          auto coeffs = polyfit(eigen_ptsx, eigen_ptsy, 3);
+
+          // Compute the inital cross-track error (cte) and psi error (epsi) values.
+          double cte = polyeval(coeffs, 0.0) - 0.0;
+          double epsi = 0.0 - atan(coeffs[1] + coeffs[2] * 0.0 + coeffs[3] * pow(0.0, 2));
+
+          // Store the current state (in vehicle coordinates).
+          Eigen::VectorXd state(6);
+          state << 0.0, 0.0, 0.0, v, cte, epsi;
+
+          size_t iters = 5;
+          // x_vals, y_vals are the MPC vehicle trajectory.
+          // They can be used as-is because they are already in vehicle coordinates.
+          std::vector<double> x_vals = {state[0]};
+          std::vector<double> y_vals = {state[1]};
+          // The first delta_vals, a_vals values will be used as the actuations.
+          std::vector<double> delta_vals = {};
+          std::vector<double> a_vals = {};
+          for (uint i = 0; i < iters; ++i) {
+            auto vars = mpc.Solve(state, coeffs);
+
+            x_vals.push_back(vars[0]);
+            y_vals.push_back(vars[1]);
+            delta_vals.push_back(vars[6]);
+            a_vals.push_back(vars[7]);
+
+            state << vars[0], vars[1], vars[2], vars[3], vars[4], vars[5];
+          }
+
+          double steer_value = -1 * delta_vals[0] / deg2rad(25);
+          double throttle_value = a_vals[0];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -107,9 +155,9 @@ int main() {
           msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
-          //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          //Display the MPC predicted trajectory
+          vector<double> mpc_x_vals = x_vals;
+          vector<double> mpc_y_vals = y_vals;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -118,8 +166,8 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals = car_ptsx;
+          vector<double> next_y_vals = car_ptsy;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
